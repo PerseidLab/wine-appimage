@@ -331,8 +331,8 @@ jobs:
 
           if [ -d "/tmp/wine/usr/local" ]; then
             echo "Moving contents of /tmp/wine/usr/local to /tmp/wine/"
-            mv /tmp/wine/usr/local/. /tmp/wine/
-            rmdir /tmp/wine/usr/local /tmp/wine/usr || true
+            cp -a /tmp/wine/usr/local/* /tmp/wine/
+            rm -rf /tmp/wine/usr
           else
             echo "/tmp/wine/usr/local not found; leaving staging directory layout unchanged"
           fi
