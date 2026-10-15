@@ -1,0 +1,288 @@
+name: Build Wine AppImage
+
+on:
+  workflow_dispatch:
+    inputs:
+      wine_url:
+        description: 'Wine tar.xz download URL'
+        required: true
+        default: 'null'
+      wine_version:
+        description: 'Wine Version tag (for naming/AppImage version)'
+        required: true
+        default: '11.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Wine AppImage (${{ github.event.inputs.wine_version }})
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget curl tar squashfs-tools file fuse libfuse2 zstd binutils xz-utils
+
+      - name: Download and Extract Prebuilt Wine 
+        run: |
+          mkdir -p appdir/opt
+          
+          WINE_URL="${{ github.event.inputs.wine_url }}"
+          echo "Downloading Wine from: $WINE_URL"
+          wget -O wine.tar.xz "$WINE_URL"
+          
+          mkdir -p appdir/opt/wine
+          tar -xf wine.tar.xz -C appdir/opt/wine --strip-components=1
+          rm wine.tar.xz
+
+      - name: Download Components (DXVK, VKD3D, Wine Mono)
+        run: |
+          mkdir -p appdir/usr/share/wine-components
+
+          DXVK_URL=$(curl -s https://api.github.com/repos/doitsujin/dxvk/releases/latest | grep "browser_download_url.*tar.gz" | cut -d '"' -f 4 | head -n 1)
+          wget -O dxvk.tar.gz "$DXVK_URL"
+          mkdir -p appdir/usr/share/wine-components/dxvk
+          tar -xf dxvk.tar.gz -C appdir/usr/share/wine-components/dxvk --strip-components=1
+          rm dxvk.tar.gz
+
+          VKD3D_URL=$(curl -s https://api.github.com/repos/HansKristian-Work/vkd3d-proton/releases/latest | grep "browser_download_url.*tar.zst" | cut -d '"' -f 4 | head -n 1)
+          if [ -z "$VKD3D_URL" ]; then
+            VKD3D_URL=$(curl -s https://api.github.com/repos/HansKristian-Work/vkd3d-proton/releases/latest | grep "browser_download_url.*tar.tar.zst" | cut -d '"' -f 4 | head -n 1)
+          fi
+          wget -O vkd3d.tar.zst "$VKD3D_URL"
+          mkdir -p appdir/usr/share/wine-components/vkd3d-proton
+          tar -I zstd -xf vkd3d.tar.zst -C appdir/usr/share/wine-components/vkd3d-proton --strip-components=1
+          rm vkd3d.tar.zst
+
+          MONO_URL=$(curl -s https://api.github.com/repos/wine-mono/wine-mono/releases/latest | grep "browser_download_url.*x86.msi" | cut -d '"' -f 4 | head -n 1)
+          wget -O wine-mono.msi "$MONO_URL"
+          mkdir -p appdir/usr/share/wine-components/mono
+          mv wine-mono.msi appdir/usr/share/wine-components/mono/
+
+      - name: Strip Debug Symbols from Wine Binaries and DLLs
+        run: |
+          find appdir/opt/wine -type f \( -name "*.so" -o -name "*.dll" -o -name "*.exe" -o -executable \) -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+      - name: Download go-appimage tool
+        run: |
+          mkdir -p bin
+          wget -c https://github.com/$(wget -q https://github.com/probonopd/go-appimage/releases/expanded_assets/continuous -O - | grep "appimagetool-.*-x86_64.AppImage" | head -n 1 | cut -d '"' -f 2) -O bin/appimagetool
+          chmod +x bin/appimagetool
+
+      - name: Create AppDir Metadata and AppRun
+        run: |
+          cat << 'EOF' > appdir/wine.desktop
+          [Desktop Entry]
+          Type=Application
+          Name=Wine 
+          Exec=AppRun
+          Icon=wine
+          Categories=Utility;
+          EOF
+
+          mkdir -p appdir/usr/share/icons/hicolor/scalable/apps/
+          touch appdir/wine.svg
+
+          cat << 'EOF' > appdir/AppRun
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+          export APPIMAGE_PATH="${APPIMAGE:-$(readlink -f "$0")}"
+          APPIMAGE_DIR="$(dirname "$APPIMAGE_PATH")"
+          APPS_DIR="$HOME/.local/share/applications"
+
+          export PATH="$HERE/opt/wine/bin:$PATH"
+          export WINEPREFIX="${WINEPREFIX:-$HOME/.wine}"
+
+          if [[ "$1" == "--install" ]]; then
+              mkdir -p "$APPS_DIR"
+
+              cat <<EOT > "$APPS_DIR/wine-runner.desktop"
+          [Desktop Entry]
+          Name=Wine Launcher
+          Exec="$APPIMAGE_PATH" %f
+          Icon=wine
+          Type=Application
+          Terminal=false
+          Categories=Utility;
+          MimeType=application/x-ms-dos-executable;application/x-msi;application/x-msdownload;
+          EOT
+
+              cat <<EOT > "$APPS_DIR/wine-explorer.desktop"
+          [Desktop Entry]
+          Name=Wine Explorer
+          Exec="$APPIMAGE_PATH" explorer
+          Icon=folder-wine
+          Type=Application
+          Terminal=false
+          Categories=Utility;
+          EOT
+
+              cat <<EOT > "$APPS_DIR/wine-winecfg.desktop"
+          [Desktop Entry]
+          Name=Wine Winecfg
+          Exec="$APPIMAGE_PATH" winecfg
+          Icon=wine-winecfg
+          Type=Application
+          Terminal=false
+          Categories=Utility;
+          EOT
+
+              cat <<EOT > "$APPS_DIR/wine-reboot.desktop"
+          [Desktop Entry]
+          Name=Wine Reboot (Kill)
+          Exec="$APPIMAGE_PATH" wineboot -k
+          Icon=folder-wine
+          Type=Application
+          Terminal=false
+          Categories=Utility;
+          EOT
+
+              cat <<EOT > "$APPS_DIR/wine-control.desktop"
+          [Desktop Entry]
+          Name=Wine Control Panel
+          Exec="$APPIMAGE_PATH" control
+          Icon=preferences-system
+          Type=Application
+          Terminal=false
+          Categories=Utility;
+          EOT
+
+              chmod +x "$APPS_DIR"/wine-*.desktop
+
+              xdg-mime default wine-runner.desktop application/x-ms-dos-executable
+              xdg-mime default wine-runner.desktop application/x-msi
+              xdg-mime default wine-runner.desktop application/x-msdownload
+
+              update-desktop-database "$APPS_DIR" 2>/dev/null
+              exit 0
+
+          elif [[ "$1" == "--uninstall" ]]; then
+              for mime in application/x-ms-dos-executable application/x-msi application/x-msdownload; do
+                  current_default=$(xdg-mime query default "$mime")
+                  if [[ "$current_default" == "wine-runner.desktop" ]]; then
+                      sed -i "/$mime=wine-runner.desktop/d" "$HOME/.config/mimeapps.list" 2>/dev/null || true
+                  fi
+              done
+
+              rm -f "$APPS_DIR/wine-runner.desktop" \
+                    "$APPS_DIR/wine-explorer.desktop" \
+                    "$APPS_DIR/wine-winecfg.desktop" \
+                    "$APPS_DIR/wine-reboot.desktop" \
+                    "$APPS_DIR/wine-control.desktop"
+
+              update-desktop-database "$APPS_DIR" 2>/dev/null
+              exit 0
+          fi
+
+          if [ ! -d "$WINEPREFIX" ]; then
+              WINEDLLOVERRIDES="mscoree=d" wineboot --init
+
+              if [ -d "$HERE/usr/share/wine-components/mono" ]; then
+                  MONO_MSI=$(find "$HERE/usr/share/wine-components/mono" -name "*.msi" | head -n 1)
+                  if [ -f "$MONO_MSI" ]; then
+                      wine msiexec /i "$MONO_MSI" /norestart
+                  fi
+              fi
+
+              if [ -d "$HERE/usr/share/wine-components/dxvk" ]; then
+                  cp -r "$HERE/usr/share/wine-components/dxvk/x64/"* "$WINEPREFIX/drive_c/windows/system32/" 2>/dev/null || true
+                  cp -r "$HERE/usr/share/wine-components/dxvk/x32/"* "$WINEPREFIX/drive_c/windows/syswow64/" 2>/dev/null || true
+              fi
+
+              if [ -d "$HERE/usr/share/wine-components/vkd3d-proton" ]; then
+                  cp -r "$HERE/usr/share/wine-components/vkd3d-proton/x64/"* "$WINEPREFIX/drive_c/windows/system32/" 2>/dev/null || true
+                  cp -r "$HERE/usr/share/wine-components/vkd3d-proton/x86/"* "$WINEPREFIX/drive_c/windows/syswow64/" 2>/dev/null || true
+              fi
+
+              wine reg add "HKEY_CURRENT_USER\Software\Wine\DllOverrides" /v d3d11 /t REG_SZ /d native,builtin /f >/dev/null 2>&1
+              wine reg add "HKEY_CURRENT_USER\Software\Wine\DllOverrides" /v dxgi /t REG_SZ /d native,builtin /f >/dev/null 2>&1
+              wine reg add "HKEY_CURRENT_USER\Software\Wine\DllOverrides" /v d3d10 /t REG_SZ /d native,builtin /f >/dev/null 2>&1
+              wine reg add "HKEY_CURRENT_USER\Software\Wine\DllOverrides" /v d3d10core /t REG_SZ /d native,builtin /f >/dev/null 2>&1
+              wine reg add "HKEY_CURRENT_USER\Software\Wine\DllOverrides" /v d3d9 /t REG_SZ /d native,builtin /f >/dev/null 2>&1
+              wine reg add "HKEY_CURRENT_USER\Software\Wine\DllOverrides" /v d3d12 /t REG_SZ /d native,builtin /f >/dev/null 2>&1
+              wine reg add "HKEY_CURRENT_USER\Software\Wine\DllOverrides" /v d3d12core /t REG_SZ /d native,builtin /f >/dev/null 2>&1
+          fi
+
+          if [ -z "$1" ]; then
+              if python3 -c "import tkinter" &>/dev/null; then
+                  python3 - << 'PY_EOF'
+          import os
+          import subprocess
+          import sys
+          import tkinter as tk
+          from tkinter import messagebox
+
+          appimage = os.getenv("APPIMAGE_PATH")
+
+          def execute(args):
+              try:
+                  if appimage:
+                      subprocess.Popen([appimage] + args)
+                  else:
+                      subprocess.Popen(["wine"] + args)
+              except Exception as e:
+                  messagebox.showerror("Error", f"Failed to execute command: {e}")
+
+          root = tk.Tk()
+          root.title("Wine ")
+          root.geometry("340x400")
+          root.resizable(False, False)
+
+          frame = tk.Frame(root, padx=15, pady=15)
+          frame.pack(fill="both", expand=True)
+
+          label = tk.Label(frame, text="Wine Runner Options", font=("Helvetica", 11, "bold"))
+          label.pack(pady=(0, 10))
+
+          buttons = [
+              ("Launch Wine Explorer", lambda: execute(["explorer"])),
+              ("Launch Winecfg", lambda: execute(["winecfg"])),
+              ("Launch regedit", lambda: execute(["regedit"])),
+              ("Kill Wine (wineboot -k)", lambda: execute(["wineboot", "-k"])),
+              ("Install MIME Integration", lambda: execute(["--install"])),
+              ("Uninstall MIME Integration", lambda: execute(["--uninstall"])),
+          ]
+
+          for text, cmd in buttons:
+              btn = tk.Button(frame, text=text, command=cmd, width=30, pady=5)
+              btn.pack(pady=5)
+
+          root.mainloop()
+          PY_EOF
+                  exit 0
+              else
+                  set -- "explorer"
+              fi
+          fi
+
+          if [ -f "$1" ]; then
+              REAL_PATH=$(readlink -f "$1")
+              shift
+              set -- "$REAL_PATH" "$@"
+          fi
+
+          exec wine "$@"
+          EOF
+          chmod +x appdir/AppRun
+
+      - name: Build AppImage with go-appimage
+        run: |
+          export ARCH=x86_64
+          export VERSION=${{ github.event.inputs.wine_version }}
+          ./bin/appimagetool appdir
+
+      - name: Upload AppImage to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./*.AppImage
+          tag_name: v${{ github.event.inputs.wine_version }}-${{ github.run_number }}
+          name: Wine v${{ github.event.inputs.wine_version }}-${{ github.run_number }}
+          body: ""
+          draft: false
+          prerelease: false
