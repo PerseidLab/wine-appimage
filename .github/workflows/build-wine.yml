@@ -282,15 +282,15 @@ jobs:
           echo "Removing include files directory..."
           rm -rf /tmp/wine/usr/local/include || true
 
-      - name: Move /usr/local to /tmp/wine/
+      - name: Move /usr/local contents to /tmp/wine/
         shell: bash
         run: |
           set -euxo pipefail
 
           if [ -d "/tmp/wine/usr/local" ]; then
-            echo "Moving /tmp/wine/usr/local -> /tmp/wine/"
-            mv /tmp/wine/usr/local "/tmp/wine/"
-            rmdir /tmp/wine/usr || true
+            echo "Moving contents of /tmp/wine/usr/local to /tmp/wine/"
+            mv /tmp/wine/usr/local/. /tmp/wine/
+            rmdir /tmp/wine/usr/local /tmp/wine/usr || true
           else
             echo "/tmp/wine/usr/local not found; leaving staging directory layout unchanged"
           fi
