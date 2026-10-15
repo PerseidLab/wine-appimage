@@ -1,0 +1,319 @@
+name: Build Wine
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: 'URL to the Wine source tarball (e.g., https://dl.winehq.org/wine/source/9.x/wine-9.0.tar.xz)'
+        required: true
+        type: string
+
+jobs:
+  build-wine:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.workflow }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-${{ github.workflow }}-
+            ${{ runner.os }}-ccache-
+
+      - name: Install Build Dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          echo 'path-exclude=/usr/share/doc/*' > /etc/dpkg/dpkg.cfg.d/99-exclude-cruft
+          echo 'path-exclude=/usr/share/locale/*' >> /etc/dpkg/dpkg.cfg.d/99-exclude-cruft
+          echo 'path-exclude=/usr/share/man/*' >> /etc/dpkg/dpkg.cfg.d/99-exclude-cruft
+          echo 'APT::Install-Recommends "false";' > /etc/apt/apt.conf
+
+          echo '#!/bin/sh' > /usr/sbin/policy-rc.d
+          echo 'exit 101' >> /usr/sbin/policy-rc.d
+          chmod +x /usr/sbin/policy-rc.d
+
+          apt-get update
+
+          apt-get install -y \
+            autoconf \
+            bison \
+            ca-certificates \
+            ccache \
+            clang \
+            curl \
+            flex \
+            fonts-liberation2 \
+            fonts-noto-cjk \
+            fonts-noto-core \
+            fvwm \
+            gettext \
+            git \
+            gstreamer1.0-libav \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-ugly \
+            jq \
+            libasound2-dev \
+            libasound2-plugins \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libcapi20-dev \
+            libcups2-dev \
+            libdbus-1-dev \
+            libfontconfig-dev \
+            libfreetype-dev \
+            libgl1-mesa-dev \
+            libgnutls28-dev \
+            libgphoto2-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer1.0-dev \
+            libice-dev \
+            libkrb5-dev \
+            libpcap-dev \
+            libpcsclite-dev \
+            libpulse-dev \
+            libsane-dev \
+            libsdl2-dev \
+            libswresample-dev \
+            libswscale-dev \
+            libudev-dev \
+            libusb-1.0-0-dev \
+            libv4l-dev \
+            libvulkan-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcomposite-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbregistry-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libxxf86vm-dev \
+            linux-libc-dev \
+            lld \
+            llvm \
+            mesa-vulkan-drivers \
+            netbase \
+            ocl-icd-opencl-dev \
+            perl \
+            pulseaudio \
+            samba-dev \
+            unixodbc-dev \
+            unzip \
+            winbind \
+            x11proto-dev \
+            xfonts-base \
+            xinit \
+            xserver-xorg \
+            xserver-xorg-video-dummy
+
+          ARCH="$(dpkg --print-architecture)"
+          if [ "$ARCH" = "amd64" ]; then
+            dpkg --add-architecture i386
+            apt-get update
+
+            apt-get install -y \
+              gcc \
+              gcc-mingw-w64-i686 \
+              gcc-mingw-w64-x86-64 \
+              gcc-multilib \
+              libunwind-dev \
+              gstreamer1.0-libav:i386 \
+              gstreamer1.0-plugins-bad:i386 \
+              gstreamer1.0-plugins-base:i386 \
+              gstreamer1.0-plugins-good:i386 \
+              gstreamer1.0-plugins-ugly:i386 \
+              libasound2-dev:i386 \
+              libasound2-plugins:i386 \
+              libavcodec-dev:i386 \
+              libavformat-dev:i386 \
+              libavutil-dev:i386 \
+              libcapi20-dev:i386 \
+              libcups2-dev:i386 \
+              libdbus-1-dev:i386 \
+              libfontconfig-dev:i386 \
+              libfreetype-dev:i386 \
+              libgl1-mesa-dev:i386 \
+              libgnutls28-dev:i386 \
+              libgphoto2-dev:i386 \
+              libice-dev:i386 \
+              libkrb5-dev:i386 \
+              liborc-0.4-dev:i386 \
+              libpcap-dev:i386 \
+              libpulse-dev:i386 \
+              libsane-dev:i386 \
+              libsdl2-dev:i386 \
+              libswresample-dev:i386 \
+              libswscale-dev:i386 \
+              libudev-dev:i386 \
+              libusb-1.0-0-dev:i386 \
+              libv4l-dev:i386 \
+              libvulkan-dev:i386 \
+              libwayland-dev:i386 \
+              libx11-dev:i386 \
+              libxcomposite-dev:i386 \
+              libxcursor-dev:i386 \
+              libxext-dev:i386 \
+              libxi-dev:i386 \
+              libxinerama-dev:i386 \
+              libxkbcommon-dev:i386 \
+              libxkbregistry-dev:i386 \
+              libxrandr-dev:i386 \
+              libxrender-dev:i386 \
+              libxxf86vm-dev:i386 \
+              linux-libc-dev:i386 \
+              mesa-vulkan-drivers:i386 \
+              ocl-icd-opencl-dev:i386 \
+              unixodbc-dev:i386
+
+            apt-get download libgstreamer-plugins-base1.0-dev:i386 libgstreamer1.0-dev:i386 || true
+            for deb in ./*.deb; do
+              [ -f "$deb" ] || continue
+              dpkg-deb -x "$deb" /dpkg
+            done
+            if [ -d /dpkg/usr/lib/i386-linux-gnu ]; then
+              cp -a /dpkg/usr/lib/i386-linux-gnu /usr/lib || true
+            fi
+            rm -rf /dpkg ./*.deb || true
+
+            curl -L -o /usr/local/bin/sarif-converter https://gitlab.com/ignis-build/sarif-converter/-/releases/permalink/latest/downloads/bin/sarif-converter-linux-amd64 || true
+            chmod +x /usr/local/bin/sarif-converter || true
+
+          elif [ "$ARCH" = "arm64" ]; then
+            curl -s -L https://github.com/mstorsjo/llvm-mingw/releases/download/20251007/llvm-mingw-20251007-ucrt-ubuntu-22.04-aarch64.tar.xz | tar xJ || true
+            mv llvm-mingw-20251007-ucrt-ubuntu-22.04-aarch64 /usr/local/llvm-mingw || true
+          fi
+
+          apt-get clean
+          useradd -m gitlab || true
+
+      - name: Configure ccache environment
+        shell: bash
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          echo "CC=ccache gcc" >> $GITHUB_ENV
+          echo "CXX=ccache g++" >> $GITHUB_ENV
+          ccache --zero-stats || true
+          ccache --version || true
+
+      - name: Download and Extract Source
+        shell: bash
+        run: |
+          echo "Downloading source from: ${{ inputs.source_url }}"
+          set -euxo pipefail
+
+          asset_base=$(basename "${{ inputs.source_url }}")
+          asset_name=$(echo "$asset_base" | sed -E 's/(\.tar\.(gz|xz|bz2)|\.tar|\.zip|\.gz|\.xz|\.bz2)$//')
+
+          echo "Asset base: $asset_base"
+          echo "Derived asset name: $asset_name"
+
+          echo "ASSET_BASE=${asset_base}" >> $GITHUB_ENV
+          echo "ASSET_NAME=${asset_name}" >> $GITHUB_ENV
+
+          curl -L -o "$asset_base" "${{ inputs.source_url }}"
+
+          mkdir -p src
+
+          case "$asset_base" in
+            *.tar.gz|*.tar.xz|*.tar.bz2|*.tar)
+              tar -xf "$asset_base" -C src --strip-components=1
+              ;;
+            *.zip)
+              unzip -q "$asset_base" -d tmp_unzip
+              topdir=$(find tmp_unzip -maxdepth 1 -mindepth 1 -type d | head -n1 || true)
+              if [ -n "$topdir" ]; then
+                mv "$topdir"/* src/ || true
+              else
+                mv tmp_unzip/* src/ || true
+              fi
+              ;;
+            *)
+              tar -xf "$asset_base" -C src --strip-components=1 || true
+              ;;
+          esac
+
+      - name: Configure Wine
+        shell: bash
+        run: |
+          cd src
+          ./configure --prefix=/usr/local --enable-win64 --enable-archs=i386,x86_64 > /dev/null 2>&1
+
+      - name: Build Wine
+        shell: bash
+        run: |
+          cd src
+          make -j"$(nproc)"
+          ccache --show-stats || true
+
+      - name: Install to Staging Directory
+        shell: bash
+        run: |
+          cd src
+          mkdir -p /tmp/wine
+          make install DESTDIR=/tmp/wine
+
+      - name: Strip Unneeded Symbols
+        shell: bash
+        run: |
+          echo "Stripping debugging symbols from shared objects, DLLs, and binaries..."
+          find /tmp/wine -type f \( -name "*.so" -o -name "*.dll" -o -name "*.exe" \) -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+      - name: Remove usr/local/include Directory
+        shell: bash
+        run: |
+          echo "Removing include files directory..."
+          rm -rf /tmp/wine/usr/local/include || true
+
+      - name: Rename /usr/local to derived asset name
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ASSET_NAME="${ASSET_NAME:-wine-build}"
+
+          if [ -d "/tmp/wine/usr/local" ]; then
+            echo "Renaming /tmp/wine/usr/local -> /tmp/wine/${ASSET_NAME}"
+            mv /tmp/wine/usr/local "/tmp/wine/${ASSET_NAME}"
+            rmdir /tmp/wine/usr || true
+          else
+            echo "/tmp/wine/usr/local not found; leaving staging directory layout unchanged"
+          fi
+
+      - name: Package to Tarball (and name asset from source)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ASSET_NAME="${ASSET_NAME:-wine-build}"
+          TAR_PATH="${GITHUB_WORKSPACE}/${ASSET_NAME}.tar.gz"
+          tar -czf "$TAR_PATH" -C /tmp/wine .
+          echo "Created asset at $TAR_PATH"
+          echo "ASSET_FILENAME=${ASSET_NAME}.tar.gz" >> $GITHUB_ENV
+
+      - name: Create GitHub Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET_FILENAME }}
+          tag_name: wine-builds
+          name: wine-builds
+          body: |
+            
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
