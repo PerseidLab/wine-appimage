@@ -272,8 +272,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ./*.AppImage
-          tag_name: v11.0.0-${{ github.run_number }}
-          name: Wine Stable v11.0.0-${{ github.run_number }}
+          tag_name: v11.0.0
+          name: Wine Stable v11.0.0
           body: ""
           draft: false
           prerelease: false
