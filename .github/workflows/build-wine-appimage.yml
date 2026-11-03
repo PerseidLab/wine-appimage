@@ -11,6 +11,11 @@ on:
         description: 'Wine Version tag (for naming/AppImage version)'
         required: true
         default: '11.0'
+      staging:
+        description: 'Upload this build as a staging asset'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -277,12 +282,22 @@ jobs:
           export VERSION=${{ github.event.inputs.wine_version }}
           ./bin/appimagetool appdir
 
+      - name: Add staging suffix to AppImage
+        if: ${{ inputs.staging }}
+        run: |
+          appimage=$(find . -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+          if [ -z "$appimage" ]; then
+            echo "No AppImage was produced"
+            exit 1
+          fi
+          mv "$appimage" "${appimage%.AppImage}-staging.AppImage"
+
       - name: Upload AppImage to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: ./*.AppImage
-          tag_name: v${{ github.event.inputs.wine_version }}
-          name: Wine v${{ github.event.inputs.wine_version }}
+          tag_name: ${{ github.event.inputs.wine_version }}
+          name: Wine ${{ github.event.inputs.wine_version }}
           body: ""
           draft: false
           prerelease: false
