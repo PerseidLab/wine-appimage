@@ -130,12 +130,25 @@ jobs:
             xserver-xorg \
             xserver-xorg-video-dummy
 
+
           ARCH="$(dpkg --print-architecture)"
+
           if [ "$ARCH" = "amd64" ]; then
             dpkg --add-architecture i386
-            apt-get update
 
-            apt-get install -y \
+            rm -rf /var/lib/apt/lists/*
+            apt-get update -o Acquire::Retries=5
+
+            echo "=== Checking i386 OpenEXR availability ==="
+            apt-cache policy libopenexr-3-1-30:i386
+            apt-cache policy gstreamer1.0-plugins-bad:i386
+
+            echo "=== Installing OpenEXR i386 dependency ==="
+            apt-get install -y --no-install-recommends \
+              libopenexr-3-1-30:i386
+
+            echo "=== Installing i386 build dependencies ==="
+            apt-get install -y --no-install-recommends \
               gcc \
               gcc-mingw-w64-i686 \
               gcc-mingw-w64-x86-64 \
@@ -189,23 +202,31 @@ jobs:
               ocl-icd-opencl-dev:i386 \
               unixodbc-dev:i386
 
-            apt-get download libgstreamer-plugins-base1.0-dev:i386 libgstreamer1.0-dev:i386 || true
+            apt-get download \
+              libgstreamer-plugins-base1.0-dev:i386 \
+              libgstreamer1.0-dev:i386 || true
+
             for deb in ./*.deb; do
               [ -f "$deb" ] || continue
               dpkg-deb -x "$deb" /dpkg
             done
+
             if [ -d /dpkg/usr/lib/i386-linux-gnu ]; then
               cp -a /dpkg/usr/lib/i386-linux-gnu /usr/lib || true
             fi
+
             rm -rf /dpkg ./*.deb || true
 
-            curl -L -o /usr/local/bin/sarif-converter https://gitlab.com/ignis-build/sarif-converter/-/releases/permalink/latest/downloads/bin/sarif-converter-linux-amd64 || true
+            curl -L -o /usr/local/bin/sarif-converter \
+              https://gitlab.com/ignis-build/sarif-converter/-/releases/permalink/latest/downloads/bin/sarif-converter-linux-amd64 || true
+
             chmod +x /usr/local/bin/sarif-converter || true
 
           elif [ "$ARCH" = "arm64" ]; then
             curl -s -L https://github.com/mstorsjo/llvm-mingw/releases/download/20251007/llvm-mingw-20251007-ucrt-ubuntu-22.04-aarch64.tar.xz | tar xJ || true
             mv llvm-mingw-20251007-ucrt-ubuntu-22.04-aarch64 /usr/local/llvm-mingw || true
           fi
+
 
           apt-get clean
           useradd -m gitlab || true
